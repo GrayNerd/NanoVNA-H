@@ -51,7 +51,7 @@
 #define INTEGRATOR_COEFF  0.1f
 
 // Add the routines to calculate the component values to match an impedance (DUT on CH-0) to 50R
-#define USE_LC_MATCHING
+//#define USE_LC_MATCHING
 
 // uncomment to use a desired coloured menu theme, otherwise it's a grey theme
 //#define MENU_THEME_BLUE
@@ -567,8 +567,13 @@ typedef struct properties
 
   float    _velocity_factor;                // fraction (0.0 to 1.0
 
-  uint8_t  _marker_index[MARKERS_MAX];      // the index of each marker
-  uint8_t  _marker_status;                  // 3-MSB's are current marker (111xxxxx = no active marker), rest of LSB's are marker enabled bit flag
+  uint8_t  _marker_index[MARKERS_MAX];      // the frequency index of each marker
+  struct
+  {
+     uint8_t active:3;							  // 3 MSB's are the active marker index .. '7' = no active marker
+     uint8_t spare:1;							  // spare bit
+     uint8_t enabled:4;							  // 5 LSB's are marker enable flags (one per marker)
+  } _marker_status;
 
   uint8_t  _domain_mode;                    // 0bxxxxxffm : where ff: TD_FUNC m: DOMAIN_MODE
 
@@ -820,12 +825,12 @@ void show_version(void);
 
 #define trace                  current_props._trace
 
-#define disable_marker(m)      { current_props._marker_status &= ~(1u << (m));}
-#define enable_marker(m)       { current_props._marker_status |=  (1u << (m));}
-#define marker_enabled(m)      ((current_props._marker_status >> (m)) & 1u)
-#define active_marker          ((current_props._marker_status >> 5) & 0x07)
-#define set_active_marker(m)   { current_props._marker_status |= 0x07 << 5; current_props._marker_status &= (((m) & 0x07) << 5) | 0x1f;}
-#define set_no_active_marker   { current_props._marker_status |= 0x07 << 5;}
+#define disable_marker(m)      { current_props._marker_status.enabled &= ~(1u << (m));}
+#define enable_marker(m)       { current_props._marker_status.enabled |=  (1u << (m));}
+#define marker_enabled(m)      ((current_props._marker_status.enabled >> (m)) & 1u)
+#define active_marker            current_props._marker_status.active
+#define set_active_marker(m)   { current_props._marker_status.active = (m & 0x07);}
+#define set_no_active_marker   { current_props._marker_status.active = 7;}
 #define marker_index(m)          current_props._marker_index[m]
 #define set_marker_index(m, i) { current_props._marker_index[m] = i;}
 

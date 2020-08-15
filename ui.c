@@ -69,6 +69,7 @@ uistat_t uistat =
 #define KP_KEYPAD                20
 #define KP_N                     21
 #define KP_P                     22
+#define KP_NONE                  23	// must be the last one
 
 // button_status
 #define NO_EVENT                 0
@@ -2322,6 +2323,9 @@ static const keypads_t keypads_freq[] =
 
 static const keypads_t keypads_scale[] =
 {
+   { 3, 0, KP_NONE },
+   { 3, 1, KP_NONE },
+   { 3, 2, KP_NONE },
    { 1, 3, KP_PERIOD },
    { 0, 3, KP_0 },
    { 0, 2, KP_1 },
@@ -2338,8 +2342,30 @@ static const keypads_t keypads_scale[] =
    { 0, 0, -1 }
 };
 
+static const keypads_t keypads_integer[] =
+{
+   { 3, 0, KP_NONE },
+   { 3, 1, KP_NONE },
+   { 3, 2, KP_NONE },
+   { 1, 3, KP_NONE },
+   { 0, 3, KP_0    },
+   { 0, 2, KP_1    },
+   { 1, 2, KP_2    },
+   { 2, 2, KP_3    },
+   { 0, 1, KP_4    },
+   { 1, 1, KP_5    },
+   { 2, 1, KP_6    },
+   { 0, 0, KP_7    },
+   { 1, 0, KP_8    },
+   { 2, 0, KP_9    },
+   { 3, 3, KP_X1   },
+   { 2, 3, KP_BS   },
+   { 0, 0, -1      }
+};
+
 static const keypads_t keypads_time[] =
 {
+   { 3, 0, KP_NONE },
    { 1, 3, KP_PERIOD },
    { 0, 3, KP_0 },
    { 0, 2, KP_1 },
@@ -2360,17 +2386,18 @@ static const keypads_t keypads_time[] =
 
 static const keypads_t * const keypads_mode_tbl[] =
 {
-   keypads_freq,  // start
-   keypads_freq,  // stop
-   keypads_freq,  // center
-   keypads_freq,  // span
-   keypads_freq,  // cw freq
-   keypads_scale, // scale
-   keypads_scale, // refpos
-   keypads_time,  // electrical delay
-   keypads_scale, // velocity factor
-   keypads_time,  // scale of delay
-	keypads_scale
+   keypads_freq,  	// start
+   keypads_freq,  	// stop
+   keypads_freq,  	// center
+   keypads_freq,  	// span
+   keypads_freq,  	// cw freq
+   keypads_scale, 	// scale
+   keypads_scale, 	// refpos
+   keypads_time,  	// electrical delay
+   keypads_scale, 	// velocity factor
+   keypads_time,  	// scale of delay
+	//keypads_scale	// auto save seconds
+	keypads_integer	// auto save seconds
 };
 
 static const char * const keypad_mode_label[] =
@@ -2380,10 +2407,13 @@ static const char * const keypad_mode_label[] =
 
 static void draw_keypad(void)
 {
+	// draw the background
+	//ili9341_fill(0, 0, LCD_WIDTH, LCD_HEIGHT, DEFAULT_MENU_UNUSED_COLOR);
+
    int i = 0;
    while (keypads[i].c >= 0)
    {
-      const bool highlight = (i == selection) ? true : false;
+      const bool highlight = (i == selection && keypads[i].c != KP_NONE) ? true : false;
 
 //    const uint16_t bg = highlight ? config.menu_active_color : config.menu_normal_color;
       const uint16_t bg = highlight ? DEFAULT_MENU_SELECT_COLOR      : DEFAULT_MENU_COLOR;        // test only
@@ -2394,9 +2424,12 @@ static void draw_keypad(void)
 
       draw_button(x, y, KP_WIDTH, KP_HEIGHT, 3, highlight, bg);
 
-      ili9341_set_foreground(fg);
-      ili9341_set_background(bg);
-      ili9341_drawfont(keypads[i].c, x + (KP_WIDTH - NUM_FONT_GET_WIDTH) / 2, y + (KP_HEIGHT - NUM_FONT_GET_HEIGHT) / 2);
+      if (keypads[i].c != KP_NONE)
+      {
+      	ili9341_set_foreground(fg);
+      	ili9341_set_background(bg);
+      	ili9341_drawfont(keypads[i].c, x + (KP_WIDTH - NUM_FONT_GET_WIDTH) / 2, y + (KP_HEIGHT - NUM_FONT_GET_HEIGHT) / 2);
+      }
 
       i++;
    }
@@ -3100,8 +3133,8 @@ static void ui_mode_keypad(int _keypad_mode)
       return;
 
    // keypads array
-   keypad_mode = _keypad_mode;
-   keypads     = keypads_mode_tbl[_keypad_mode];
+   keypad_mode        = _keypad_mode;
+   keypads            = keypads_mode_tbl[_keypad_mode];
    keypads_last_index = 0;
    while (keypads[keypads_last_index + 1].c >= 0)
       keypads_last_index++;
@@ -3347,6 +3380,9 @@ static int keypad_click(int key)
    const int current_trace = config.current_trace;
 
    const int c = keypads[key].c;
+
+   if (keypads[key].c == KP_NONE)
+   	return KP_CONTINUE;
 
    if ((c >= KP_X1 && c <= KP_G) || c == KP_N || c == KP_P)
    {

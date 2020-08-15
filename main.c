@@ -40,7 +40,7 @@
 #include <chprintf.h>
 
 #ifndef VERSION
-   #define VERSION "2020.Aug.06-1 by OneOfEleven from DiSlord 0.9.3.4"
+   #define VERSION "2020.Aug.06-2 by OneOfEleven from DiSlord 0.9.3.4"
 #endif
 
 #ifdef  __USE_SD_CARD__
@@ -117,7 +117,7 @@ static uint16_t get_sweep_mode(void);
 static void     cal_interpolate(int s);
 static void     update_frequencies(bool update_marker_indexes);
 static void     set_frequencies(uint32_t start, uint32_t stop, uint16_t points);
-static bool     sweep(bool break_on_operation, uint16_t sweep_mode);
+static bool     sweep(bool break_on_operation, uint16_t sweep_mode, bool no_cal);
 static void     transform_domain(void);
 static  int32_t my_atoi(const char *p);
 static uint32_t my_atoui(const char *p);
@@ -177,7 +177,7 @@ static THD_FUNCTION(Thread1, arg)
       bool completed = false;
       if ((sweep_mode & (SWEEP_ENABLE | SWEEP_ONCE)) && !ui_menu_user_present)   // 'ui_menu_user_present' so as to give full priority to the users input
       {
-         completed = sweep(true, get_sweep_mode());
+         completed = sweep(true, get_sweep_mode(), false);
          sweep_mode &= ~SWEEP_ONCE;
       }
       else
@@ -516,7 +516,7 @@ VNA_SHELL_FUNCTION(cmd_reset)
    (void)argc;
    (void)argv;
 
-   if (argc == 1)
+   if (argc >= 1)
    {
       if (strcmp(argv[0], "dfu") == 0)
       {
@@ -694,7 +694,8 @@ static int get_str_index(char *v, const char *list)
 
 VNA_SHELL_FUNCTION(cmd_offset)
 {
-  if (argc != 1) {
+  if (argc < 1)
+  {
     shell_printf("usage: offset {frequency offset(Hz)}\r\n");
     return;
   }
@@ -707,7 +708,8 @@ VNA_SHELL_FUNCTION(cmd_offset)
 
 VNA_SHELL_FUNCTION(cmd_freq)
 {
-  if (argc != 1) {
+  if (argc < 1)
+  {
     goto usage;
   }
   uint32_t freq = my_atoui(argv[0]);
@@ -721,7 +723,8 @@ usage:
 
 VNA_SHELL_FUNCTION(cmd_power)
 {
-  if (argc != 1) {
+  if (argc < 1)
+  {
     shell_printf("usage: power {0-3}\r\n");
     return;
   }
@@ -852,7 +855,7 @@ VNA_SHELL_FUNCTION(cmd_data)
       array = cal_data[sel - 2];
    else
    {
-      shell_printf("usage: data [array 0, 1 or 2..%d]\r\n", 2 + SAVEAREA_MAX);
+      shell_printf("usage: data [0, 1 or 2..%d]\r\n", 2 + SAVEAREA_MAX - 1);
       return;
    }
 
@@ -867,7 +870,7 @@ VNA_SHELL_FUNCTION(cmd_data)
       int j;
       int len;
 
-      if (argc == 1)
+      if (argc >= 1)
          dump_selection = my_atoi(argv[0]);
 
       dsp_start(3);
@@ -1040,7 +1043,10 @@ void load_default_properties(void)
 
    for (i = 0; i < MARKERS_MAX; i++)
       current_props._marker_index[i]  = (current_props._sweep_points / 2) + (i * 10);
-   current_props._marker_status       = 0b00000001;   // active marker (top 3 MSB's) = marker-0, marker-0 enabled, rest disabled
+
+   current_props._marker_status.active  = 0;         // active marker = 0
+   current_props._marker_status.spare   = 0;         //
+   current_props._marker_status.enabled = 0b00001;   // marker-0 enabled, rest disabled
 
    current_props._velocity_factor     = 0.66;
 
@@ -1134,7 +1140,7 @@ static uint16_t get_sweep_mode(void){
 }
 
 // main loop for measurement
-bool sweep(bool break_on_operation, uint16_t sweep_mode)
+bool sweep(bool break_on_operation, uint16_t sweep_mode, bool no_cal)
 {
    if (p_sweep >= sweep_points || break_on_operation == false)
       RESET_SWEEP;
@@ -1182,7 +1188,7 @@ bool sweep(bool break_on_operation, uint16_t sweep_mode)
 
             (*sample_func)(gamma);      // calculate reflection coefficient
 
-            if (cal_status & CALSTAT_APPLY)
+            if (cal_status & CALSTAT_APPLY && !no_cal)
                apply_CH0_error_term_at(gamma, p_sweep);
 
 				#ifdef USE_INTEGRATOR
@@ -1216,7 +1222,7 @@ bool sweep(bool break_on_operation, uint16_t sweep_mode)
 
             (*sample_func)(gamma);      // calculate transmission coefficient
 
-            if (cal_status & CALSTAT_APPLY)
+            if (cal_status & CALSTAT_APPLY && !no_cal)
                apply_CH1_error_term_at(gamma, p_sweep);
 
 				#ifdef USE_INTEGRATOR
@@ -1330,7 +1336,9 @@ VNA_SHELL_FUNCTION(cmd_scan_bin)
 
       pause_sweep();
 
-      sweep(false, sweep_mode);
+      const bool no_sweep_cal = (mask & 8) ? true : false;
+
+      sweep(false, sweep_mode, no_sweep_cal);
 
       // send the bianry data LS-Byte first (little endian)
 
@@ -1401,7 +1409,10 @@ VNA_SHELL_FUNCTION(cmd_scan)
       cal_interpolate(config.current_id);
 
    pause_sweep();
-   sweep(false, sweep_mode);
+
+   const bool no_sweep_cal = (mask & 8) ? true : false;
+
+   sweep(false, sweep_mode, no_sweep_cal);
 
    // Output data after if set (faster data recive)
    if (mask)
@@ -1622,7 +1633,7 @@ get_sweep_frequency(int type)
 
 VNA_SHELL_FUNCTION(cmd_sweep)
 {
-   if (argc == 0)
+   if (argc < 1)
    {
       shell_printf("%u %u %d\r\n", get_sweep_frequency(ST_START), get_sweep_frequency(ST_STOP), sweep_points);
       return;
@@ -1976,7 +1987,7 @@ void cal_collect(int type)
 //  if (sweep_points != POINTS_COUNT)
 //    set_sweep_points(POINTS_COUNT);
 
-  sweep(false, src == 0 ? SWEEP_CH0_MEASURE : SWEEP_CH1_MEASURE);
+  sweep(false, src == 0 ? SWEEP_CH0_MEASURE : SWEEP_CH1_MEASURE, false);
   config.bandwidth = bw;          // restore
   cal_status = status;
 
@@ -2153,7 +2164,7 @@ VNA_SHELL_FUNCTION(cmd_cal)
 {
   static const char *items[] = { "load", "open", "short", "thru", "isoln", "Es", "Er", "Et", "cal'ed" };
 
-  if (argc == 0)
+  if (argc < 1)
   {
     int i;
     for (i = 0; i < 9; i++)
@@ -2218,7 +2229,7 @@ VNA_SHELL_FUNCTION(cmd_cal)
 
 VNA_SHELL_FUNCTION(cmd_save)
 {
-  if (argc != 1)
+  if (argc < 1)
     goto usage;
 
   int id = my_atoi(argv[0]);
@@ -2234,7 +2245,7 @@ VNA_SHELL_FUNCTION(cmd_save)
 
 VNA_SHELL_FUNCTION(cmd_recall)
 {
-   if (argc != 1)
+   if (argc < 1)
       goto usage;
 
    const int id = my_atoi(argv[0]);
@@ -2340,7 +2351,8 @@ float get_trace_refpos(int t)
 VNA_SHELL_FUNCTION(cmd_trace)
 {
   int t;
-  if (argc == 0) {
+  if (argc <= 0)
+  {
     for (t = 0; t < TRACES_MAX; t++) {
       if (trace[t].enabled) {
         const char *type = get_trace_typename(t);
@@ -2363,6 +2375,7 @@ VNA_SHELL_FUNCTION(cmd_trace)
   t = my_atoi(argv[0]);
   if (t < 0 || t >= TRACES_MAX)
     goto usage;
+
   if (argc == 1) {
     const char *type = get_trace_typename(t);
     const char *channel = trc_channel_name[trace[t].channel];
@@ -2427,13 +2440,11 @@ float get_electrical_delay(void)
 
 VNA_SHELL_FUNCTION(cmd_edelay)
 {
-  if (argc == 0) {
+  if (argc < 1) {
     shell_printf("%+f\r\n", electrical_delay);
     return;
   }
-  if (argc > 0) {
-    set_electrical_delay(my_atof(argv[0]));
-  }
+  set_electrical_delay(my_atof(argv[0]));
 }
 
 VNA_SHELL_FUNCTION(cmd_marker)
@@ -2442,7 +2453,7 @@ VNA_SHELL_FUNCTION(cmd_marker)
 
    int marker;
 
-   if (argc == 0)
+   if (argc < 1)
    {
       for (marker = 0; marker < MARKERS_MAX; marker++)
       {
@@ -2571,7 +2582,7 @@ set_timedomain_window(int func) // accept TD_WINDOW_MINIMUM/TD_WINDOW_NORMAL/TD_
 VNA_SHELL_FUNCTION(cmd_transform)
 {
   int i;
-  if (argc == 0) {
+  if (argc <= 0) {
     goto usage;
   }
   //                                         0   1       2    3        4       5      6       7
@@ -2796,7 +2807,7 @@ VNA_SHELL_FUNCTION(cmd_vbat)
 
 VNA_SHELL_FUNCTION(cmd_vbat_offset)
 {
-   if (argc != 1)
+   if (argc < 1)
    {
       shell_printf("%d\r\n", config.vbat_offset_mv);
       return;
@@ -2806,7 +2817,7 @@ VNA_SHELL_FUNCTION(cmd_vbat_offset)
 
 VNA_SHELL_FUNCTION(cmd_vbat_top)
 {
-   if (argc != 1)
+   if (argc < 1)
    {
       shell_printf("%d\r\n", config.vbat_top_mv);
       return;
@@ -2816,7 +2827,7 @@ VNA_SHELL_FUNCTION(cmd_vbat_top)
 /*
 VNA_SHELL_FUNCTION(cmd_vbat_bottom)
 {
-   if (argc != 1)
+   if (argc < 1)
    {
       shell_printf("%d\r\n", config.vbat_bottom_mv);
       return;
@@ -2826,7 +2837,7 @@ VNA_SHELL_FUNCTION(cmd_vbat_bottom)
 
 VNA_SHELL_FUNCTION(cmd_vbat_warning)
 {
-   if (argc != 1)
+   if (argc < 1)
    {
       shell_printf("%d\r\n", config.vbat_warning_mv);
       return;
